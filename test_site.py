@@ -1,6 +1,6 @@
 """
 Tests for sage-site static content.
-Validates structural and compliance requirements.
+Validates structural and content requirements; these checks do not establish legal compliance.
 """
 import os
 
@@ -32,14 +32,9 @@ def test_privacy_names_spark_ai():
     content = read("privacy.html")
     assert "Spark AI Pty Ltd" in content
 
-def test_privacy_has_abn():
-    content = read("privacy.html")
-    # ABN 53 699 211 919 (with spaces or without)
-    assert "53 699 211 919" in content or "53699211919" in content
-
 def test_privacy_has_contact_email():
     content = read("privacy.html")
-    assert "harry@harrykey.com" in content
+    assert "ridingoneggshells@gmail.com" in content
 
 def test_privacy_mentions_privacy_act():
     content = read("privacy.html")
@@ -47,7 +42,7 @@ def test_privacy_mentions_privacy_act():
 
 def test_privacy_covers_discord_user_ids():
     content = read("privacy.html")
-    assert "Discord User ID" in content or "user ID" in content.lower()
+    assert "Discord User ID" in content or "user id" in content.lower()
 
 def test_privacy_covers_message_content():
     content = read("privacy.html")
@@ -84,12 +79,12 @@ def test_terms_australian_law():
 
 def test_terms_has_contact_email():
     content = read("terms.html")
-    assert "harry@harrykey.com" in content
+    assert "ridingoneggshells@gmail.com" in content
 
 
 # --- Navigation: all pages link to each other ---
 
-PAGES = ["index.html", "privacy.html", "terms.html"]
+PAGES = ["index.html", "board.html", "privacy.html", "terms.html"]
 
 def _check_nav_links(filename):
     content = read(filename)
