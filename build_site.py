@@ -8,7 +8,7 @@ def build():
         text=(ROOT/name).read_text(encoding="utf-8")
         if "PENDING CONFIRMATION" in text or "Draft awaiting" in text:
             raise SystemExit("Legal pages still await a verified contact; publication is blocked.")
-    out=ROOT/"public"
+    out=ROOT/"dist"
     out.mkdir(exist_ok=True)
     for name in PUBLIC:
         shutil.copyfile(ROOT/name, out/name)
