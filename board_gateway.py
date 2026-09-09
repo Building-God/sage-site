@@ -3,7 +3,7 @@ import asyncio
 import json
 from pathlib import Path
 from aiohttp import web, ClientSession, ClientTimeout, WSMsgType, ClientError
-from board_audio import LiveAudio
+from board_audio import AudioService, AUDIO_HTTP
 
 UPSTREAM = "http://127.0.0.1:9300"
 SITE_ORIGIN = "https://sage.ridingoneggshells.chatgpt.site"
@@ -57,7 +57,18 @@ async def audio_stream(request):
     audio = request.app.get("audio")
     if audio is None or not await live_state(request.app["client"]):
         return web.Response(status=503, text="Live audio unavailable")
-    return await audio.stream(request)
+    # Local preview fallback. Public /audio.mp3 routes straight to the audio
+    # service, so board snapshots cannot stall audio delivery on this loop.
+    async with request.app["client"].get(AUDIO_HTTP + "/audio.mp3", timeout=ClientTimeout(total=None, sock_read=5)) as upstream:
+        response = web.StreamResponse(status=upstream.status, headers={
+            "Content-Type": "audio/mpeg", "Cache-Control": "no-store"})
+        await response.prepare(request)
+        try:
+            async for chunk in upstream.content.iter_any():
+                await asyncio.wait_for(response.write(chunk), timeout=2)
+        except (ConnectionError, asyncio.TimeoutError):
+            pass
+        return response
 
 async def asset(request):
     client = request.app["client"]
@@ -136,7 +147,7 @@ async def client_context(app):
         yield
 
 async def audio_context(app):
-    audio = LiveAudio(lambda: live_state(app["client"]))
+    audio = AudioService()
     app["audio"] = audio
     await audio.start()
     try:

@@ -6,16 +6,21 @@ import logging
 from pathlib import Path
 import sys
 import time
+import os
+import subprocess
+
+import psutil
 
 import av
 import numpy as np
-from aiohttp import web
+from aiohttp import web, ClientSession, ClientTimeout, ClientError
 
 GODBOT = Path(__file__).resolve().parent.parent / "GodBot"
 sys.path.insert(0, str(GODBOT))
 from public_audio import ADDRESS, HEADER, MAGIC, RATE, FRAME_BYTES, configured_channel
 
 MAPPING_STATE = GODBOT / "data" / "phoenix" / "live_state_9300" / "offset.json"
+AUDIO_HTTP = "http://127.0.0.1:19303"
 
 
 def mapped_channel():
@@ -164,6 +169,8 @@ class LiveAudio(asyncio.DatagramProtocol):
             await asyncio.sleep(max(0, deadline - time.monotonic()))
 
     async def stream(self, request):
+        if request.method != "GET":
+            return web.Response(status=404)
         if not self.available or len(self.listeners) >= 20:
             return web.Response(status=503, text="Live audio unavailable")
         queue = asyncio.Queue(maxsize=100)  # Slow viewers disconnect, never delay the room.
@@ -185,3 +192,78 @@ class LiveAudio(asyncio.DatagramProtocol):
         with contextlib.suppress(ConnectionError):
             await response.write_eof()
         return response
+
+
+class AudioService:
+    """A separate process keeps board JSON parsing off the audio clock/GIL."""
+    def __init__(self):
+        self.available = False
+        self.process = None
+        self.task = None
+
+    async def start(self):
+        # A prior worker exits itself when its gateway parent ends.
+        await asyncio.sleep(1)
+        self.process = await asyncio.create_subprocess_exec(
+            sys.executable, "-B", str(Path(__file__).resolve()), "--parent", str(os.getpid()),
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        self.task = asyncio.create_task(self.monitor())
+
+    async def monitor(self):
+        async with ClientSession(timeout=ClientTimeout(total=2)) as client:
+            while True:
+                try:
+                    async with client.get(AUDIO_HTTP + "/status") as response:
+                        state = await response.json()
+                        self.available = bool(state.get("audio") and state.get("parent") == os.getpid())
+                except (OSError, ValueError, ClientError, asyncio.TimeoutError):
+                    self.available = False
+                await asyncio.sleep(.5)
+
+    async def close(self):
+        self.available = False
+        if self.task:
+            self.task.cancel()
+            await asyncio.gather(self.task, return_exceptions=True)
+        if self.process and self.process.returncode is None:
+            self.process.terminate()
+            await self.process.wait()
+
+
+async def serve_audio(parent_pid):
+    # No independent capture lifecycle: a dead gateway means this worker ends.
+    parent = psutil.Process(parent_pid)
+    async with ClientSession(timeout=ClientTimeout(total=3)) as client:
+        async def state():
+            try:
+                async with client.get("http://127.0.0.1:9300/api/status") as response:
+                    data = await response.json()
+                    if response.status == 200 and data.get("session_mode") == "live" and not data.get("replay_running"):
+                        return data.get("session_id")
+            except (OSError, ValueError, ClientError, asyncio.TimeoutError):
+                pass
+            return None
+        audio = LiveAudio(state)
+        async def status(request):
+            return web.json_response({"audio": audio.available, "parent": parent_pid})
+        app = web.Application()
+        app.router.add_get("/", audio.stream)
+        app.router.add_get("/audio.mp3", audio.stream)
+        app.router.add_get("/status", status)
+        runner = web.AppRunner(app, access_log=None, shutdown_timeout=2)
+        try:
+            await audio.start()
+            await runner.setup()
+            await web.TCPSite(runner, "127.0.0.1", 19303).start()
+            while parent.is_running():
+                await asyncio.sleep(.5)
+        finally:
+            await audio.close()
+            await runner.cleanup()
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--parent", type=int, required=True)
+    asyncio.run(serve_audio(parser.parse_args().parent))
