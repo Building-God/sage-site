@@ -6,6 +6,9 @@ from aiohttp import web, ClientSession, ClientTimeout, WSMsgType, ClientError
 UPSTREAM = "http://127.0.0.1:9300"
 SITE_ORIGIN = "https://sage.ridingoneggshells.chatgpt.site"
 PORT = 19301
+# Long live sessions include complete talk-time histories (already >12 MiB).
+# Keep a finite upstream bound without rejecting that snapshot before the ledger.
+UPSTREAM_MAX_MESSAGE_BYTES = 64 * 1024 * 1024
 EVENTS = frozenset({"session_info", "history_begin", "history_end", "ledger_event",
     "phoenix_reset", "voice_activity", "talk_time_update", "sidebar_update",
     "discussion_assessment_update", "clear_placed_notes", "transcript_line", "keepalive"})
@@ -61,7 +64,7 @@ async def socket(request):
     if not session_id:
         return web.Response(status=503, text="No live board")
     downstream = web.WebSocketResponse(heartbeat=20, max_msg_size=4096)
-    async with client.ws_connect(UPSTREAM + "/ws", max_msg_size=8 * 1024 * 1024) as upstream:
+    async with client.ws_connect(UPSTREAM + "/ws", max_msg_size=UPSTREAM_MAX_MESSAGE_BYTES) as upstream:
         initial = await upstream.receive(timeout=5)
         if initial.type != WSMsgType.TEXT:
             return web.Response(status=503)
@@ -72,6 +75,7 @@ async def socket(request):
         if hello.get("type") != "session_info" or hello.get("mode") != "live" or hello.get("session_id") != session_id:
             return web.Response(status=503)
         await downstream.prepare(request)
+        await downstream.send_json(hello)
         async def consume_viewer():
             async for _ in downstream:
                 pass  # Viewer input is never forwarded upstream.
@@ -87,6 +91,9 @@ async def socket(request):
         try:
             async for message in upstream:
                 if downstream.closed:
+                    break
+                if message.type == WSMsgType.ERROR:
+                    await downstream.close(code=1011, message=b"Board source connection failed")
                     break
                 if message.type != WSMsgType.TEXT:
                     continue
