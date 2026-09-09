@@ -1,11 +1,14 @@
 """Read-only public bridge to the existing Sage renderer. No archived routes."""
 import asyncio
 import json
+from pathlib import Path
 from aiohttp import web, ClientSession, ClientTimeout, WSMsgType, ClientError
+from board_audio import LiveAudio
 
 UPSTREAM = "http://127.0.0.1:9300"
 SITE_ORIGIN = "https://sage.ridingoneggshells.chatgpt.site"
 PORT = 19301
+ROOT = Path(__file__).resolve().parent
 # Long live sessions include complete talk-time histories (already >12 MiB).
 # Keep a finite upstream bound without rejecting that snapshot before the ledger.
 UPSTREAM_MAX_MESSAGE_BYTES = 64 * 1024 * 1024
@@ -28,7 +31,7 @@ async def live_state(client):
 
 @web.middleware
 async def guard(request, handler):
-    if request.method != "GET" or request.path not in {"/", "/tokens.json", "/status", "/ws"}:
+    if request.method != "GET" or request.path not in {"/", "/tokens.json", "/status", "/ws", "/listen.js", "/listen.css", "/audio.mp3"}:
         return web.Response(status=404, text="Not available")
     try:
         response = await handler(request)
@@ -41,7 +44,20 @@ async def guard(request, handler):
     return response
 
 async def status(request):
-    return web.json_response({"live": bool(await live_state(request.app["client"]))})
+    result = {"live": bool(await live_state(request.app["client"]))}
+    audio = request.app.get("audio")
+    if audio is not None:
+        result["audio"] = result["live"] and audio.available
+    return web.json_response(result)
+
+async def listen_asset(request):
+    return web.FileResponse(ROOT / request.path.lstrip("/"))
+
+async def audio_stream(request):
+    audio = request.app.get("audio")
+    if audio is None or not await live_state(request.app["client"]):
+        return web.Response(status=503, text="Live audio unavailable")
+    return await audio.stream(request)
 
 async def asset(request):
     client = request.app["client"]
@@ -55,6 +71,8 @@ async def asset(request):
     if path == "/phoenix":
         html = raw.decode("utf-8")
         html = html.replace("<body>", "<body><style>#ctrl,#replay-error-banner{display:none!important}</style>", 1)
+        html = html.replace("</head>", '<link rel="stylesheet" href="/listen.css"></head>', 1)
+        html = html.replace("</body>", '<div id="live-audio"><button id="listen" type="button" aria-pressed="false" disabled>Listen</button><span id="listen-status" role="status">Checking audio...</span></div><script src="/listen.js" defer></script></body>', 1)
         return web.Response(text=html, content_type="text/html")
     return web.Response(body=raw, content_type="application/json")
 
@@ -117,13 +135,27 @@ async def client_context(app):
         app["client"] = client
         yield
 
-def create_app():
+async def audio_context(app):
+    audio = LiveAudio(lambda: live_state(app["client"]))
+    app["audio"] = audio
+    await audio.start()
+    try:
+        yield
+    finally:
+        await audio.close()
+
+def create_app(*, with_audio=True):
     app = web.Application(middlewares=[guard])
     app.cleanup_ctx.append(client_context)
+    if with_audio:
+        app.cleanup_ctx.append(audio_context)
     app.router.add_get("/status", status)
     app.router.add_get("/ws", socket)
     app.router.add_get("/", asset)
     app.router.add_get("/tokens.json", asset)
+    app.router.add_get("/listen.js", listen_asset)
+    app.router.add_get("/listen.css", listen_asset)
+    app.router.add_get("/audio.mp3", audio_stream)
     return app
 
 if __name__ == "__main__":

@@ -37,7 +37,7 @@ class BoardGatewayTests(unittest.IsolatedAsyncioTestCase):
         await self.origin.start_server()
         self.old=gateway.UPSTREAM
         gateway.UPSTREAM=str(self.origin.make_url("")).rstrip("/")
-        self.server=TestServer(gateway.create_app())
+        self.server=TestServer(gateway.create_app(with_audio=False))
         await self.server.start_server()
         self.client=ClientSession()
     async def asyncTearDown(self):

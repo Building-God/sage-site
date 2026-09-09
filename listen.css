@@ -1,0 +1,34 @@
+#live-audio {
+  position: fixed;
+  z-index: 10000;
+  top: max(1rem, env(safe-area-inset-top));
+  right: max(1rem, env(safe-area-inset-right));
+  display: flex;
+  align-items: flex-end;
+  flex-direction: column;
+  gap: .4rem;
+  max-width: min(16rem, calc(100vw - 2rem));
+  font: 400 .875rem/1.4 system-ui, sans-serif;
+  color: #e8eaf0;
+}
+#listen {
+  min-height: 44px;
+  min-width: 88px;
+  padding: .65rem 1rem;
+  border: 1px solid #757c91;
+  border-radius: 6px;
+  background: #11151e;
+  color: #f4f5fa;
+  font: 600 .9375rem/1.2 system-ui, sans-serif;
+  cursor: pointer;
+}
+#listen:hover:not(:disabled) { background: #293044; }
+#listen:focus-visible { outline: 3px solid #ffd06a; outline-offset: 3px; }
+#listen[aria-pressed="true"] { border-color: #ffd06a; }
+#listen:disabled { color: #aeb5c7; cursor: default; }
+#listen-status:not(:empty) {
+  padding: .3rem .55rem;
+  border-radius: 4px;
+  background: #11151e;
+  text-align: right;
+}
