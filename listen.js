@@ -34,7 +34,7 @@
       status.textContent = '';
     } catch (_) {
       if (current !== attempt) return;
-      stop('Couldn't play audio. Tap to retry.');
+      stop('Unable to play audio. Tap to retry.');
       button.textContent = 'Retry audio';
     }
   });

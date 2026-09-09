@@ -2,6 +2,9 @@ import asyncio
 import io
 import time
 import unittest
+import shutil
+import subprocess
+from pathlib import Path
 from unittest.mock import patch
 
 import av
@@ -16,6 +19,13 @@ def packet(user, pcm=b"", channel=123, age=0):
 
 
 class AudioTests(unittest.IsolatedAsyncioTestCase):
+    def test_listen_script_parses_after_repository_text_normalization(self):
+        node = shutil.which('node')
+        if not node:
+            self.skipTest('Node is required for the shipped JavaScript parse check')
+        result = subprocess.run([node, '--check', str(Path(__file__).with_name('listen.js'))], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def make_audio(self):
         audio = LiveAudio(None)
         audio.channel = 123
