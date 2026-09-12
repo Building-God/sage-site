@@ -79,15 +79,15 @@ class BoardGatewayTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn(ended.type,[WSMsgType.CLOSE,WSMsgType.CLOSED])
 
     async def test_long_session_snapshot_does_not_prevent_board_history(self):
-        # Reproduce the production ordering: a >8 MiB timing snapshot precedes
-        # history_begin. The previous client limit closed with zero ledger rows.
+        # Reproduce the old production ordering: a >8 MiB timing snapshot
+        # precedes history_begin. The public bridge must reveal the board first.
         self.large_snapshot = {"type":"talk_time_update", "history": "x" * (12 * 1024 * 1024)}
         async with self.client.ws_connect(self.server.make_url("/ws"), max_msg_size=32*1024*1024) as ws:
             messages = [await ws.receive_json(timeout=5) for _ in range(5)]
             self.assertEqual([m["type"] for m in messages],
-                ["session_info", "talk_time_update", "history_begin", "ledger_event", "history_end"])
-            self.assertEqual(messages[1], self.large_snapshot)
-            self.assertEqual(messages[3]["event"]["seq"], 1)
+                ["session_info", "history_begin", "ledger_event", "history_end", "talk_time_update"])
+            self.assertEqual(messages[4], self.large_snapshot)
+            self.assertEqual(messages[2]["event"]["seq"], 1)
             self.assertFalse(ws.closed)
 
 if __name__=="__main__": unittest.main()

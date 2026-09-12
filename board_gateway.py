@@ -92,7 +92,10 @@ async def socket(request):
     session_id = await live_state(client)
     if not session_id:
         return web.Response(status=503, text="No live board")
-    downstream = web.WebSocketResponse(heartbeat=20, max_msg_size=4096)
+    # Browser clients negotiate per-message deflate here. Long-running rooms
+    # can carry a highly-compressible, multi-MiB talk-time history.
+    downstream = web.WebSocketResponse(
+        heartbeat=20, max_msg_size=4096, compress=True)
     async with client.ws_connect(UPSTREAM + "/ws", max_msg_size=UPSTREAM_MAX_MESSAGE_BYTES) as upstream:
         initial = await upstream.receive(timeout=5)
         if initial.type != WSMsgType.TEXT:
@@ -117,6 +120,11 @@ async def socket(request):
                     await upstream.close()
                     return
         tasks = [asyncio.create_task(consume_viewer()), asyncio.create_task(watch_session())]
+        # The currently running source may predate the canonical ordering fix
+        # and emit large sidecar snapshots before history_begin. Hold that
+        # finite prefix so the actual board can bootstrap and reveal first.
+        before_history = True
+        deferred_prefix = []
         try:
             async for message in upstream:
                 if downstream.closed:
@@ -132,8 +140,19 @@ async def socket(request):
                     continue
                 if payload.get("type") == "session_info" and (payload.get("mode") != "live" or payload.get("session_id") != session_id):
                     break
-                if payload.get("type") in EVENTS:
-                    await downstream.send_json(payload)
+                kind = payload.get("type")
+                if kind not in EVENTS:
+                    continue
+                if before_history and kind != "history_begin":
+                    deferred_prefix.append(payload)
+                    continue
+                if kind == "history_begin":
+                    before_history = False
+                await downstream.send_json(payload)
+                if kind == "history_end" and deferred_prefix:
+                    for deferred in deferred_prefix:
+                        await downstream.send_json(deferred)
+                    deferred_prefix.clear()
         finally:
             for task in tasks:
                 task.cancel()

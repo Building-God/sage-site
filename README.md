@@ -32,6 +32,12 @@ snapshots hold Python's GIL; even a separate audio thread delivered only
 3-6 seconds of sound per8-10 seconds. The isolated process delivered7.968
 seconds per8.011 seconds through public HTTPS during verification.
 
+The bridge also protects remote reconnects from old Viz sources that emit
+large timing/transcript sidecars before the Phoenix ledger: it holds that
+finite prefix until `history_end` and negotiates WebSocket compression. This
+lets the board reveal before secondary state instead of looking blank while a
+multi-MiB talk-time history crosses the public link.
+
 `tailscale serve` switches443 back to tailnet-only even when just adding a
 path. Restore `tailscale funnel --bg --https=443 --yes http://127.0.0.1:19301`
 after a Serve change, and inspect Funnel status to retain both handlers.
