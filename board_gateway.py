@@ -1,4 +1,4 @@
-"""Read-only public bridge to the existing Sage renderer. No archived routes."""
+"""Live public bridge to Sage's renderer and room-authorized exhibit actions."""
 import asyncio
 import json
 from pathlib import Path
@@ -7,6 +7,7 @@ from board_audio import AudioService, AUDIO_HTTP
 
 UPSTREAM = "http://127.0.0.1:9300"
 SITE_ORIGIN = "https://sage.ridingoneggshells.chatgpt.site"
+BOARD_ORIGIN = "https://grunty.tail197337.ts.net"
 PORT = 19301
 ROOT = Path(__file__).resolve().parent
 # Long live sessions include complete talk-time histories (already >12 MiB).
@@ -14,7 +15,10 @@ ROOT = Path(__file__).resolve().parent
 UPSTREAM_MAX_MESSAGE_BYTES = 64 * 1024 * 1024
 EVENTS = frozenset({"session_info", "history_begin", "history_end", "ledger_event",
     "phoenix_reset", "voice_activity", "talk_time_update", "sidebar_update",
-    "discussion_assessment_update", "clear_placed_notes", "transcript_line", "keepalive"})
+    "discussion_assessment_update", "clear_placed_notes", "transcript_line", "keepalive",
+    "exhibit_playback"})
+PARTICIPANT_GET = frozenset({"/auth/discord/start", "/auth/discord/callback", "/api/exhibits/me"})
+PARTICIPANT_POST = frozenset({"/api/exhibits/annotate", "/api/exhibits/playback"})
 OFFLINE = "<!doctype html><html lang=en><meta name=viewport content='width=device-width,initial-scale=1'><title>Sage board offline</title><body style='background:#0f1117;color:#e8eaf0;font:18px system-ui;padding:3rem'><h1>The board is offline</h1><p>No live Sage session is available. Please check back during a discussion.</p></body></html>"
 
 async def live_state(client):
@@ -31,7 +35,9 @@ async def live_state(client):
 
 @web.middleware
 async def guard(request, handler):
-    if request.method != "GET" or request.path not in {"/", "/tokens.json", "/status", "/ws", "/listen.js", "/listen.css", "/audio.mp3"}:
+    readable = {"/", "/tokens.json", "/status", "/ws", "/listen.js", "/listen.css", "/audio.mp3"} | PARTICIPANT_GET
+    if not ((request.method == "GET" and request.path in readable)
+            or (request.method == "POST" and request.path in PARTICIPANT_POST)):
         return web.Response(status=404, text="Not available")
     try:
         response = await handler(request)
@@ -42,6 +48,57 @@ async def guard(request, handler):
             "Referrer-Policy": "no-referrer", "Access-Control-Allow-Origin": SITE_ORIGIN,
             "Content-Security-Policy": "frame-ancestors 'self' " + SITE_ORIGIN})
     return response
+
+
+async def participant_route(request):
+    """Proxy only the OAuth and exhibit-action routes through the public guard.
+
+    The upstream sees the fixed public Host and a public-viewer marker. Cookies,
+    CSRF, and OAuth state stay within this board origin; private Sage APIs never
+    pass through this gateway.
+    """
+    from urllib.parse import urlsplit
+
+    board = urlsplit(BOARD_ORIGIN)
+    if (board.scheme != "https" or not board.netloc or board.path or board.query
+            or board.fragment or request.host.lower() != board.netloc.lower()):
+        return web.Response(status=403, text="Board origin unavailable")
+    if request.path != "/auth/discord/callback" and not await live_state(request.app["client"]):
+        return web.Response(status=503, text="No live board")
+    if request.method == "POST":
+        if request.headers.get("Origin") != BOARD_ORIGIN:
+            return web.Response(status=403, text="Same-origin submission required")
+        limit = 4096 if request.path == "/api/exhibits/annotate" else 1024
+        if request.content_length is not None and request.content_length > limit:
+            return web.Response(status=413, text="Request too large")
+        body = await request.content.read(limit + 1)
+        if len(body) > limit or request.content_type != "application/json":
+            return web.Response(status=413 if len(body) > limit else 415,
+                                text="Invalid request body")
+    else:
+        body = None
+    path = request.path_qs
+    headers = {"Host": board.netloc, "Cf-Connecting-Ip": "192.0.2.1"}
+    if request.method == "POST":
+        headers.update({"Origin": BOARD_ORIGIN, "Content-Type": "application/json",
+                        "X-Sage-CSRF": request.headers.get("X-Sage-CSRF", "")})
+    # Never forward arbitrary browser cookies, credentials, or proxy headers.
+    cookie_names = ("sage_oauth_state", "sage_participant")
+    cookies = [f"{key}={request.cookies[key]}" for key in cookie_names
+               if key in request.cookies]
+    if cookies:
+        headers["Cookie"] = "; ".join(cookies)
+    async with request.app["client"].request(
+            request.method, UPSTREAM + path, headers=headers, data=body,
+            allow_redirects=False, timeout=ClientTimeout(total=25)) as upstream:
+        raw = await upstream.read()
+        response = web.Response(body=raw, status=upstream.status)
+        for key in ("Content-Type", "Location"):
+            if key in upstream.headers:
+                response.headers[key] = upstream.headers[key]
+        for value in upstream.headers.getall("Set-Cookie", []):
+            response.headers.add("Set-Cookie", value)
+        return response
 
 async def status(request):
     result = {"live": bool(await live_state(request.app["client"]))}
@@ -186,6 +243,10 @@ def create_app(*, with_audio=True):
     app.router.add_get("/listen.js", listen_asset)
     app.router.add_get("/listen.css", listen_asset)
     app.router.add_get("/audio.mp3", audio_stream)
+    for path in PARTICIPANT_GET:
+        app.router.add_get(path, participant_route)
+    for path in PARTICIPANT_POST:
+        app.router.add_post(path, participant_route)
     return app
 
 if __name__ == "__main__":

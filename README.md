@@ -2,8 +2,11 @@
 
 The static website embeds the live board at `https://grunty.tail197337.ts.net/`.
 `board_gateway.py` serves that board from Sage's existing `:9300` renderer on
-loopback `:19301`. It exposes only live, read-only events and explicit assets.
-It does not expose the local server's archives or control APIs.
+loopback `:19301`. It exposes live events and explicit assets, plus the narrow
+Discord sign-in, annotation and shared-video routes. Those writes are checked
+against Sage's current voice-room roster before reaching the board. The
+gateway does not expose archives or operator controls. OAuth must register
+`https://grunty.tail197337.ts.net/auth/discord/callback` as its redirect URI.
 
 ## Live audio
 

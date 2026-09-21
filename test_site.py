@@ -34,7 +34,7 @@ def test_privacy_names_spark_ai():
 
 def test_privacy_has_contact_email():
     content = read("privacy.html")
-    assert "ridingoneggshells@gmail.com" in content
+    assert "the.sage.system.email@gmail.com" in content
 
 def test_privacy_mentions_privacy_act():
     content = read("privacy.html")
@@ -79,7 +79,7 @@ def test_terms_australian_law():
 
 def test_terms_has_contact_email():
     content = read("terms.html")
-    assert "ridingoneggshells@gmail.com" in content
+    assert "the.sage.system.email@gmail.com" in content
 
 
 # --- Navigation: all pages link to each other ---
