@@ -6,3 +6,12 @@ __pycache__/
 public/
 dist/
 *.tar.gz
+
+# t_40e532e2 (2026-09-23): starve the ChatGPT.exe `git diff --no-index`
+# storm. Any dependency tree or scratch worktree landing in the repo becomes
+# fuel for that walker (2026-09-09: 43k files pegged CPU, mouse frozen).
+node_modules/
+.venv/
+.worktrees/
+_worktrees/
+task_artifacts/
