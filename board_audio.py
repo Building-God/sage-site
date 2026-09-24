@@ -17,7 +17,7 @@ from aiohttp import web, ClientSession, ClientTimeout, ClientError
 
 GODBOT = Path(__file__).resolve().parent.parent / "GodBot"
 sys.path.insert(0, str(GODBOT))
-from public_audio import ADDRESS, HEADER, MAGIC, RATE, FRAME_BYTES, configured_channel
+from public_audio import ADDRESS, HEADER, MAGIC, RATE, FRAME_BYTES, audio_enabled
 
 MAPPING_STATE = GODBOT / "data" / "phoenix" / "live_state_9300" / "offset.json"
 AUDIO_HTTP = "http://127.0.0.1:19303"
@@ -74,8 +74,12 @@ class LiveAudio(asyncio.DatagramProtocol):
     async def monitor(self):
         while True:
             session = await self.live_state()
-            selected = configured_channel()
-            channel = selected if selected and selected == mapped_channel() and session else 0
+            # No fixed target room any more: accept whatever room the board
+            # itself says is active. datagram_received only keeps packets
+            # whose embedded channel (the bot's actual current room) matches
+            # this, so playback follows Sage room-for-room without either
+            # side needing to know a configured id (Harry, 2026-09-24).
+            channel = mapped_channel() if audio_enabled() and session else 0
             if (channel, session) != (self.channel, self.session):
                 self.end_listeners()
                 self.heartbeat = 0

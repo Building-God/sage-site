@@ -71,11 +71,46 @@ class AudioTests(unittest.IsolatedAsyncioTestCase):
         async def live(): return "live-room"
         audio.live_state = live
         audio.listeners.add(queue)
-        with patch('board_audio.configured_channel', return_value=123), patch('board_audio.mapped_channel', return_value=456):
+        with patch('board_audio.audio_enabled', return_value=False), patch('board_audio.mapped_channel', return_value=456):
             task = asyncio.create_task(audio.monitor())
             try:
                 self.assertIsNone(await asyncio.wait_for(queue.get(), .5))
                 self.assertEqual(audio.channel, 0)
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+    async def test_worker_follows_sage_from_one_room_to_another(self):
+        """Harry, 2026-09-24: "The room she's in goes out. We want that room."
+        No fixed channel is configured any more -- the worker accepts whatever
+        room the board itself says is active (`mapped_channel`), and only
+        packets whose embedded channel (the bot's actual current room) match
+        that get through. Moving the board's active room mid-session must
+        move playback with it, and a stale packet tagged with the old room
+        must stop counting immediately."""
+        audio = LiveAudio(None)
+        async def live(): return "live-room"
+        audio.live_state = live
+        mapped = [111]
+        with patch('board_audio.audio_enabled', return_value=True), \
+                patch('board_audio.mapped_channel', side_effect=lambda: mapped[0]):
+            task = asyncio.create_task(audio.monitor())
+            try:
+                await asyncio.sleep(.1)
+                self.assertEqual(audio.channel, 111)
+                audio.datagram_received(packet(0, channel=111), ("127.0.0.1", 1))
+                self.assertTrue(audio.available)  # room 111's own audio is heard
+
+                # Sage moves rooms; the board's active room follows her there.
+                mapped[0] = 222
+                await asyncio.sleep(.6)
+                self.assertEqual(audio.channel, 222)
+                # A packet still tagged with the OLD room no longer counts.
+                audio.datagram_received(packet(0, channel=111), ("127.0.0.1", 1))
+                self.assertFalse(audio.available)
+                # A packet tagged with the NEW room is heard.
+                audio.datagram_received(packet(0, channel=222), ("127.0.0.1", 1))
+                self.assertTrue(audio.available)
             finally:
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
