@@ -15,7 +15,9 @@ import av
 import numpy as np
 from aiohttp import web, ClientSession, ClientTimeout, ClientError
 
-GODBOT = Path(__file__).resolve().parent.parent / "GodBot"
+# The live bot runs from SageLiveRuntime (tracks origin/main); the shared GodBot checkout drifts.
+_LIVE = Path(__file__).resolve().parent.parent / "SageLiveRuntime"
+GODBOT = _LIVE if (_LIVE / "public_audio.py").exists() else Path(__file__).resolve().parent.parent / "GodBot"
 sys.path.insert(0, str(GODBOT))
 from public_audio import ADDRESS, HEADER, MAGIC, RATE, FRAME_BYTES, audio_enabled
 
