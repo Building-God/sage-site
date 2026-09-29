@@ -35,7 +35,7 @@ async def live_state(client):
 
 @web.middleware
 async def guard(request, handler):
-    readable = {"/", "/tokens.json", "/status", "/ws", "/listen.js", "/listen.css", "/audio.mp3"} | PARTICIPANT_GET
+    readable = {"/", "/tokens.json", "/status", "/ws", "/listen.js", "/listen.css", "/audio.mp3", "/room"} | PARTICIPANT_GET
     if not ((request.method == "GET" and request.path in readable)
             or (request.method == "POST" and request.path in PARTICIPANT_POST)):
         return web.Response(status=404, text="Not available")
@@ -131,12 +131,12 @@ async def asset(request):
     client = request.app["client"]
     if not await live_state(client):
         return web.Response(text=OFFLINE, content_type="text/html", status=503)
-    path = "/phoenix" if request.path == "/" else "/tokens.json"
+    path = "/phoenix" if request.path == "/" else ("/room" if request.path == "/room" else "/tokens.json")
     async with client.get(UPSTREAM + path, timeout=ClientTimeout(total=8)) as r:
         if r.status != 200:
             return web.Response(status=503, text="Board unavailable")
         raw = await r.read()
-    if path == "/phoenix":
+    if path in ("/phoenix", "/room"):
         html = raw.decode("utf-8")
         html = html.replace("<body>", "<body><style>#ctrl,#replay-error-banner{display:none!important}</style>", 1)
         html = html.replace("</head>", '<link rel="stylesheet" href="/listen.css"></head>', 1)
@@ -240,6 +240,7 @@ def create_app(*, with_audio=True):
     app.router.add_get("/ws", socket)
     app.router.add_get("/", asset)
     app.router.add_get("/tokens.json", asset)
+    app.router.add_get("/room", asset)
     app.router.add_get("/listen.js", listen_asset)
     app.router.add_get("/listen.css", listen_asset)
     app.router.add_get("/audio.mp3", audio_stream)
